@@ -352,7 +352,7 @@ class OneBlob(object):
 
         N = len(cat)
         ## FIXME Sersic
-        B.dchisq = np.zeros((N, 6), np.float32)
+        B.dchisq = np.zeros((N, 7), np.float32)
         B.all_models    = np.array([{} for i in range(N)])
         B.all_model_ivs = np.array([{} for i in range(N)])
         B.all_model_cpu = np.array([{} for i in range(N)])
@@ -1053,6 +1053,16 @@ class OneBlob(object):
                         exp.getPosition().copy(), exp.getBrightness().copy(),
                         exp.getShape().copy(), SersicIndex(1.))
                 print('Initialized SER model:', newsrc)
+
+            if name == 'sercore' and newsrc is None:
+                # Start at ser.
+                from tractor.sercore import SersicCoreGalaxy
+                si = ser.sersicindex
+                si = np.clip(si, 0.5, 5.0)
+                newsrc = sercore = SersicCoreGalaxy(
+                    ser.getPosition().copy(), ser.getBrightness().copy(),
+                    ser.getShape().copy(), SersicIndex(si))
+                print('Initialized SER-core model:', newsrc)
                     
             srccat[0] = newsrc
 
@@ -1060,7 +1070,7 @@ class OneBlob(object):
             if is_galaxy:
                 # This is a known large galaxy -- set max size based on initial size.
                 logrmax = known_galaxy_logrmax
-                if name in ('exp', 'rex', 'dev', 'ser'):
+                if name in ('exp', 'rex', 'dev', 'ser', 'sercore'):
                     newsrc.shape.setMaxLogRadius(logrmax)
                 elif name == 'comp':
                     newsrc.shapeExp.setMaxLogRadius(logrmax)
@@ -1070,7 +1080,7 @@ class OneBlob(object):
                 fblob = 0.8
                 sh,sw = srcwcs.shape
                 logrmax = np.log(fblob * max(sh, sw) * self.pixscale)
-                if name in ['exp', 'rex', 'dev', 'ser']:
+                if name in ['exp', 'rex', 'dev', 'ser', 'sercore']:
                     if logrmax < newsrc.shape.getMaxLogRadius():
                         newsrc.shape.setMaxLogRadius(logrmax)
                 elif name in ['comp']:
@@ -1142,7 +1152,8 @@ class OneBlob(object):
 
             ## FIXME Sersic
             from tractor.sersic import SersicGalaxy
-            if isinstance(newsrc, (DevGalaxy, ExpGalaxy, SersicGalaxy)):
+            from tractor.sercore import SersicCoreGalaxy
+            if isinstance(newsrc, (DevGalaxy, ExpGalaxy, SersicGalaxy, SersicCoreGalaxy)):
                 oldshape = newsrc.shape
             elif isinstance(newsrc, FixedCompositeGalaxy):
                 oldshape = (newsrc.shapeExp, newsrc.shapeDev,newsrc.fracDev)
@@ -1165,7 +1176,7 @@ class OneBlob(object):
             assert(B.all_models[srci][name].numberOfParams() == nsrcparams)
 
             # Now revert the ellipses!
-            if isinstance(newsrc, (DevGalaxy, ExpGalaxy, SersicGalaxy)):
+            if isinstance(newsrc, (DevGalaxy, ExpGalaxy, SersicGalaxy, SersicCoreGalaxy)):
                 newsrc.shape = oldshape
             elif isinstance(newsrc, FixedCompositeGalaxy):
                 (newsrc.shapeExp, newsrc.shapeDev,newsrc.fracDev) = oldshape
@@ -1194,10 +1205,10 @@ class OneBlob(object):
         # Actually select which model to keep.  This "modnames"
         # array determines the order of the elements in the DCHISQ
         # column of the catalog.
-        modnames = ['ptsrc', 'rex', 'dev', 'exp', 'comp', 'ser']
+        modnames = ['ptsrc', 'rex', 'dev', 'exp', 'comp', 'ser', 'sercore']
         keepmod = _select_model(chisqs, nparams, galaxy_margin)
         keepsrc = {'none':None, 'ptsrc':ptsrc, 'rex':rex,
-                   'dev':dev, 'exp':exp, 'comp':comp, 'ser':ser}[keepmod]
+                   'dev':dev, 'exp':exp, 'comp':comp, 'ser':ser, 'sercore':sercore}[keepmod]
         bestchi = chisqs.get(keepmod, 0.)
 
         print('Keeping model', keepmod, '(chisqs: ', chisqs, ')')
@@ -1302,8 +1313,8 @@ class OneBlob(object):
         if self.plots_per_source:
             import pylab as plt
             plt.clf()
-            rows,cols = 3, 7
-            modnames = ['none', 'ptsrc', 'rex', 'dev', 'exp', 'comp', 'ser']
+            rows,cols = 3, 8
+            modnames = ['none', 'ptsrc', 'rex', 'dev', 'exp', 'comp', 'ser', 'sercore']
 
             plt.subplot(rows, cols, 1)
             # Top-left: image
