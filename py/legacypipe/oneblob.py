@@ -12,6 +12,10 @@ from tractor import Tractor, PointSource, Image, Catalog, Patch
 from tractor.galaxy import DevGalaxy, ExpGalaxy, FixedCompositeGalaxy, SoftenedFracDev, FracDev, disable_galaxy_cache, enable_galaxy_cache
 from tractor.patch import ModelMask
 
+from tractor.sersic import SersicGalaxy
+from tractor.sersic import SersicIndex
+from tractor.sercore import SersicCoreGalaxy
+
 from legacypipe.survey import (RexGalaxy, GaiaSource,
                                LegacyEllipseWithPriors, get_rgb)
 from legacypipe.bits import IN_BLOB
@@ -43,7 +47,6 @@ def one_blob(X):
     if len(timargs) == 0:
         return None
 
-    from tractor.sersic import SersicIndex
     SersicIndex.stepsize = 0.001
     
     if plots:
@@ -979,7 +982,7 @@ class OneBlob(object):
 
         chisqs_none = _per_band_chisqs(srctractor, self.bands)
 
-        nparams = dict(ptsrc=2, rex=3, exp=5, dev=5, ser=6, comp=9)
+        nparams = dict(ptsrc=2, rex=3, exp=5, dev=5, ser=6, sercore=7, comp=9)
         # This is our "upgrade" threshold: how much better a galaxy
         # fit has to be versus ptsrc, and comp versus galaxy.
         galaxy_margin = 3.**2 + (nparams['exp'] - nparams['ptsrc'])
@@ -990,6 +993,7 @@ class OneBlob(object):
 
         oldmodel, ptsrc, rex, dev, exp, comp = _initialize_models(src)
         ser = None
+        sercore = None
 
         trymodels = [('ptsrc', ptsrc)]
 
@@ -1010,6 +1014,7 @@ class OneBlob(object):
             # If the source was initialized as a galaxy, try all models
             trymodels.extend([('rex', rex),
                               ('dev', dev), ('exp', exp), ('ser', None),
+                              ('sercore', None),
                               ('comp', comp)])
 
         cputimes = {}
@@ -1023,7 +1028,8 @@ class OneBlob(object):
                 chi_psf = chisqs.get('ptsrc', 0)
                 if chi_rex > chi_psf or max(chi_psf, chi_rex) > 400:
                     trymodels.extend([
-                        ('dev', dev), ('exp', exp), ('ser', None), ('comp', comp)])
+                        ('dev', dev), ('exp', exp), ('ser', None), ('sercore', None),
+                        ('comp', comp)])
                 continue
 
             if name == 'comp' and newsrc is None:
@@ -1043,25 +1049,27 @@ class OneBlob(object):
                 if smod not in ['dev', 'exp']:
                     continue
                 if smod == 'dev':
-                    from tractor.sersic import SersicGalaxy, SersicIndex
-                    newsrc = ser = SersicGalaxy(#src.getPosition(), src.getBrightness(),
+                    newsrc = ser = SersicGalaxy(
                         dev.getPosition().copy(), dev.getBrightness().copy(),
                         dev.getShape().copy(), SersicIndex(4.))
                 elif smod == 'exp':
-                    from tractor.sersic import SersicGalaxy, SersicIndex
-                    newsrc = ser = SersicGalaxy(#src.getPosition(), src.getBrightness(),
+                    newsrc = ser = SersicGalaxy(
                         exp.getPosition().copy(), exp.getBrightness().copy(),
                         exp.getShape().copy(), SersicIndex(1.))
                 print('Initialized SER model:', newsrc)
 
             if name == 'sercore' and newsrc is None:
+                if not 'ser' in chisqs:
+                    continue
                 # Start at ser.
-                from tractor.sercore import SersicCoreGalaxy
-                si = ser.sersicindex
+                si = ser.sersicindex.getValue()
                 si = np.clip(si, 0.5, 5.0)
+                br = ser.getBrightness().copy()
+                nb = br.numberOfParams()
+                br.setParams([0.]*nb)
                 newsrc = sercore = SersicCoreGalaxy(
                     ser.getPosition().copy(), ser.getBrightness().copy(),
-                    ser.getShape().copy(), SersicIndex(si))
+                    ser.getShape().copy(), SersicIndex(si), br)
                 print('Initialized SER-core model:', newsrc)
                     
             srccat[0] = newsrc
@@ -1151,8 +1159,6 @@ class OneBlob(object):
 
 
             ## FIXME Sersic
-            from tractor.sersic import SersicGalaxy
-            from tractor.sercore import SersicCoreGalaxy
             if isinstance(newsrc, (DevGalaxy, ExpGalaxy, SersicGalaxy, SersicCoreGalaxy)):
                 oldshape = newsrc.shape
             elif isinstance(newsrc, FixedCompositeGalaxy):
@@ -1656,7 +1662,7 @@ class OneBlob(object):
         return tims
 
 def _convert_ellipses(src):
-    if isinstance(src, (DevGalaxy, ExpGalaxy, SersicGalaxy)):
+    if isinstance(src, (DevGalaxy, ExpGalaxy, SersicGalaxy, SersicCoreGalaxy)):
         src.shape = src.shape.toEllipseE()
         if isinstance(src, RexGalaxy):
             src.shape.freezeParams('e1', 'e2')
@@ -2118,25 +2124,31 @@ def _select_model(chisqs, nparams, galaxy_margin):
         keepmod = 'dev'
 
     # Consider Sersic models using same cut as Composite
+    ### FIXME -- no nparams here??
     if not 'ser' in chisqs:
-        return keepmod
-    diff = chisqs['ser'] - chisqs[keepmod]
+        sdiff = 0.
+    else:
+        sdiff = chisqs['ser'] - chisqs[keepmod]
+    if not 'sercore' in chisqs:
+        cdiff = 0.
+    else:
+        cdiff = chisqs['sercore'] - chisqs[keepmod]
+
     fcut = 0.01 * chisqs[keepmod]
     cut = max(cut, fcut)
-    if diff < cut:
+
+    if max(sdiff, cdiff) < cut:
         return keepmod
-    keepmod = 'ser'
     
+
     if not 'comp' in chisqs:
         return keepmod
-
     diff = chisqs['comp'] - chisqs[keepmod]
     #print('Comparing', keepmod, 'to comp.  cut:', cut, 'comp:', diff)
     fcut = 0.01 * chisqs[keepmod]
     cut = max(cut, fcut)
     if diff < cut:
         return keepmod
-
     #print('Upgrading from dev/exp to composite.')
     keepmod = 'comp'
     return keepmod

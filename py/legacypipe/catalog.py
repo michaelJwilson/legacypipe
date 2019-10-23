@@ -5,6 +5,7 @@ import numpy as np
 from tractor import PointSource, getParamTypeTree, RaDecPos
 from tractor.galaxy import ExpGalaxy, DevGalaxy, FixedCompositeGalaxy
 from tractor.sersic import SersicGalaxy
+from tractor.sercore import SersicCoreGalaxy
 from tractor.ellipses import EllipseESoft, EllipseE
 
 from legacypipe.survey import RexGalaxy, GaiaSource
@@ -14,6 +15,7 @@ fits_typemap = { PointSource: 'PSF',
                  ExpGalaxy: 'EXP',
                  DevGalaxy: 'DEV',
                  SersicGalaxy: 'SER',
+                 SersicCoreGalaxy: 'SEC',
                  FixedCompositeGalaxy: 'COMP',
                  RexGalaxy: 'REX',
                  GaiaSource: 'PSF',
@@ -27,6 +29,7 @@ fits_short_typemap = { PointSource: 'P',
                        DevGalaxy: 'D',
                        FixedCompositeGalaxy: 'C',
                        SersicGalaxy: 'I',
+                       SersicCoreGalaxy: 'O',
                        RexGalaxy: 'R',
                        GaiaSource: 'G' }
 
@@ -88,7 +91,10 @@ def prepare_fits_catalog(cat, invvars, T, hdr, filts, fs, allbands=None,
         i = allbands.index(filt)
         for j,src in enumerate(cat):
             if src is not None:
-                flux[j,i] = sum(b.getFlux(filt) for b in src.getBrightnesses())
+                if isinstance(src, SersicCoreGalaxy):
+                    flux[j,i] = src.brightness.getFlux(filt)
+                else:
+                    flux[j,i] = sum(b.getFlux(filt) for b in src.getBrightnesses())
 
         if invvars is None:
             continue
@@ -96,17 +102,40 @@ def prepare_fits_catalog(cat, invvars, T, hdr, filts, fs, allbands=None,
         # vector so that we can read off the parameter variances via the
         # python object apis.
         cat.setParams(invvars)
-
         for j,src in enumerate(cat):
             if src is not None:
-                flux_ivar[j,i] = sum(b.getFlux(filt) for b in src.getBrightnesses())
-
+                if isinstance(src, SersicCoreGalaxy):
+                    flux_ivar[j,i] = src.brightness.getFlux(filt)
+                else:
+                    flux_ivar[j,i] = sum(b.getFlux(filt) for b in src.getBrightnesses())
         cat.setParams(params0)
 
     T.set('%sflux' % prefix, flux)
     if save_invvars:
         T.set('%sflux_ivar' % prefix, flux_ivar)
 
+    # SersicCore core flux
+    coreflux = np.zeros((len(cat), len(allbands)), np.float32)
+    coreflux_ivar = np.zeros((len(cat), len(allbands)), np.float32)
+    for filt in filts:
+        i = allbands.index(filt)
+        for j,src in enumerate(cat):
+            if src is not None and isinstance(src, SersicCoreGalaxy):
+                coreflux[j,i] = src.brightnessPsf.getFlux(filt)
+        if invvars is None:
+            continue
+        # Oh my, this is tricky... set parameter values to the variance
+        # vector so that we can read off the parameter variances via the
+        # python object apis.
+        cat.setParams(invvars)
+        for j,src in enumerate(cat):
+            if src is not None and isinstance(src, SersicCoreGalaxy):
+                coreflux_ivar[j,i] = src.brightnessPsf.getFlux(filt)
+        cat.setParams(params0)
+    T.set('%scoreflux' % prefix, coreflux)
+    if save_invvars:
+        T.set('%scoreflux_ivar' % prefix, coreflux_ivar)
+        
     if fs is not None:
         fskeys = ['prochi2', 'pronpix', 'profracflux', 'proflux', 'npix']
         for k in fskeys:
@@ -184,6 +213,10 @@ def _get_tractor_fits_values(T, cat, pat, unpackShape=True):
             shapeDev[i,:] = src.shape.getAllParams()
             fracDev[i] = 1.
         elif isinstance(src, SersicGalaxy):
+            # Arbitrary choice here to stick Sersic params in shapeExp!
+            shapeExp[i,:] = src.shape.getAllParams()
+            sersic[i] = src.sersicindex.getValue()
+        elif isinstance(src, SersicCoreGalaxy):
             # Arbitrary choice here to stick Sersic params in shapeExp!
             shapeExp[i,:] = src.shape.getAllParams()
             sersic[i] = src.sersicindex.getValue()

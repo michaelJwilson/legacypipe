@@ -79,7 +79,8 @@ def format_catalog(T, hdr, primhdr, allbands, outfn, release,
     # Expand out FLUX and related fields from grz arrays to 'allbands'
     # (eg, ugrizY) arrays.
     B = np.array([allbands.index(band) for band in bands])
-    keys = ['flux', 'flux_ivar', 'rchisq', 'fracflux', 'fracmasked', 'fracin',
+    keys = ['flux', 'flux_ivar', 'coreflux', 'coreflux_ivar',
+            'rchisq', 'fracflux', 'fracmasked', 'fracin',
             'nobs', 'anymask', 'allmask', 'psfsize', 'psfdepth', 'galdepth',
             'fiberflux', 'fibertotflux']
     if has_ap:
@@ -202,6 +203,8 @@ def format_catalog(T, hdr, primhdr, allbands, outfn, release,
     add_fluxlike('flux_ivar')
     if has_wise:
         add_wiselike('flux_ivar')
+    add_fluxlike('coreflux')
+    add_fluxlike('coreflux_ivar')
     add_fluxlike('fiberflux')
     add_fluxlike('fibertotflux')
     if has_ap:

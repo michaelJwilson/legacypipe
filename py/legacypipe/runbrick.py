@@ -1330,7 +1330,7 @@ def stage_fitblobs(T=None,
     ns,nb = BB.dchisq.shape
     assert(ns == len(cat))
     ## FIXME Sersic
-    assert(nb == 6) # ptsrc, rex, dev, exp, comp
+    assert(nb == 7) # ptsrc, rex, dev, exp, comp, ser, sercore
 
     # Renumber blobs to make them contiguous.
     oldblob = T.blob
@@ -1515,7 +1515,7 @@ def _format_all_models(T, newcat, BB, bands):
 
     hdr = fitsio.FITSHDR()
 
-    srctypes = ['ptsrc', 'rex', 'dev','exp','comp', 'ser']
+    srctypes = ['ptsrc', 'rex', 'dev','exp','comp', 'ser', 'sercore']
 
     for srctype in srctypes:
         # Create catalog with the fit results for each source type
@@ -1549,10 +1549,17 @@ def _format_all_models(T, newcat, BB, bands):
             ('shape' in col or 'fracDev' in col)):
             TT.delete_column(col)
             continue
+        if 'sersic' in col and not col.startswith('ser'):
+            TT.delete_column(col)
+            continue
+        if 'coreflux' in col and not col.startswith('sercore'):
+            TT.delete_column(col)
+            continue
         # shapeDev for exp sources, vice versa
         # (NOTE, this also removes "fracDev" from 'exp' and 'ser'.
         if (('exp_' in col and 'Dev' in col) or
             ('ser_' in col and 'Dev' in col) or
+            ('sercore_' in col and 'Dev' in col) or
             ('dev_' in col and 'Exp' in col) or
             ('rex_' in col and 'Dev' in col)):
             TT.delete_column(col)
