@@ -1656,10 +1656,8 @@ class OneBlob(object):
         return tims
 
 def _convert_ellipses(src):
-    if isinstance(src, (DevGalaxy, ExpGalaxy)):
-        #print('Converting ellipse for source', src)
+    if isinstance(src, (DevGalaxy, ExpGalaxy, SersicGalaxy)):
         src.shape = src.shape.toEllipseE()
-        #print('--->', src.shape)
         if isinstance(src, RexGalaxy):
             src.shape.freezeParams('e1', 'e2')
     elif isinstance(src, FixedCompositeGalaxy):
