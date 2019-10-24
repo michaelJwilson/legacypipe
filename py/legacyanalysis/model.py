@@ -55,27 +55,35 @@ if __name__ == '__main__':
     sky_level_pixel   = float(sky_levels_pixel[0])                        # [counts / pixel]                                                                                                                                        
 
     gmag              = 23.0
-    gflux             = exptime * 10.**((zpt - gmag) / 2.5)               # [Total counts on the image].
+    ##  gflux         = exptime * 10.**((zpt - gmag) / 2.5)               # [Total counts on the image].
+    gflux             = 10**(-0.4*(gmag-22.5))
+
     gre               = 0.40                                              # [arcsec].                    
 
     ##  https://github.com/dstndstn/tractor/blob/13d3239500c5af873935c81d079c928f4cdf0b1d/doc/galsim.rst                                                                                                                             
-    _gflux            = tractor.Fluxes(g=gflux, r=0.0, z=0.0)
+    ##  _gflux        = tractor.Fluxes(g=gflux, r=0.0, z=0.0)
+    _gflux            = tractor.NanoMaggies(g=gflux, r=0.0, z=0.0)
+
     src               = RexGalaxy(tractor.RaDecPos(ra, dec), _gflux, LogRadius(gre))
-    
+
     wcs               = Tan(ra, dec, W/2.+0.5, H/2.+0.5, -ps, 0., 0., ps, float(W), float(H))
     wcs               = tractor.ConstantFitsWcs(wcs)
 
     tims = []
 
     for band in ['g', 'r', 'z']:
-        photcal       = tractor.LinearPhotoCal(1., band=band)
-    
+        ##  photcal   = tractor.LinearPhotoCal(1., band=band)
+        photcal       = tractor.MagsPhotoCal(band, zpt)
+        
         tim           = tractor.Image(data=np.zeros((H,W),  np.float32),
                                       inverr=np.ones((H,W), np.float32),
                                       psf=psf,
                                       wcs=wcs,
                                       photcal=photcal)
 
+        _tr           = tractor.Tractor([tim], [src])
+        mod           = _tr.getModelImage(0)
+        
         ##  The rms of the noise in ADU.
         ##  noise     = galsim.PoissonNoise(rng, sky_level=sky_level_pixel)
 
@@ -85,7 +93,7 @@ if __name__ == '__main__':
         image         = galsim.Image(np.array(tim.data))
         image.addNoise(noise)
 
-        tim.data      = image.array
+        tim.data      = image.array + mod.data
         tims.append(tim)
         
     ##
