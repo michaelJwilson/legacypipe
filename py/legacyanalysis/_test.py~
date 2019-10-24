@@ -26,7 +26,7 @@ if __name__ == '__main__':
     ##  Median per-pixel error standard deviation, in nanomaggies.
     sky_levels_sigs   = decam_accds[1]['sig1'][:]
     sky_level_sig     = float(sky_levels_sigs[0])
-    sky_level_sig     = tractor.NanoMaggies(**{'g': sky_level_sig, 'r': 0.0,  'z': 0.0})
+    sky_level_sig     = tractor.NanoMaggies(g=sky_level_sig, r=0.0, z=0.0)
     
     psf_fwhm_pixels   = decam_accds[1]['fwhm'][:]
     psf_fwhm          = psf_fwhm_pixels[0] * pixscale                     # arcsecond.                                                                                                                                              
@@ -63,7 +63,7 @@ if __name__ == '__main__':
 
     ##  https://github.com/dstndstn/tractor/blob/13d3239500c5af873935c81d079c928f4cdf0b1d/doc/galsim.rst                                                                                                                             
     ##  _gflux        = tractor.Fluxes(g=gflux, r=0.0, z=0.0)
-    _gflux            = tractor.NanoMaggies(**{'g': gflux, 'r': 0.0,  'z': 0.0})
+    _gflux            = tractor.NanoMaggies(g=gflux, r=0.0, z=0.0)
 
     src               = RexGalaxy(tractor.RaDecPos(ra, dec), _gflux, LogRadius(gre))
 
@@ -80,10 +80,10 @@ if __name__ == '__main__':
         
         ##  The rms of the noise in ADU.                                                                                                                                                                                               
         ##  noise      = galsim.PoissonNoise(rng, sky_level=sky_level_pixel)                                                                                                                                                             
-        ##  Gaussian approximation for large N.                                                                                                                                                                                        
+	##  Gaussian approximation for large N.                                                                                                                                                                                        
         ##  noise      = galsim.GaussianNoise(rng, sigma=sky_level_sig)                                                                                                                                                                  
         ##  Rendered in counts.                                                                                                                                                                                                        
-        noise          = np.random.normal(loc=csky_level_sig, scale=np.sqrt(csky_level_sig), size=(H,W))
+	noise          = np.random.normal(loc=csky_level_sig, scale=np.sqrt(csky_level_sig), size=tim.data.shape)
         
         tim            = tractor.Image(data=np.zeros((H,W),  np.float32),
                                        inverr=np.ones((H,W), np.float32),
@@ -91,10 +91,10 @@ if __name__ == '__main__':
                                        wcs=wcs,
                                        photcal=photcal)
 
-        ##  _tr            = tractor.Tractor([tim], [src])
-        ##  mod            = _tr.getModelImage(0)
+        _tr            = tractor.Tractor([tim], [src])
+        mod            = _tr.getModelImage(0)
 
-        tim.data       = tim.data + noise.data ##  + mod.data
+        tim.data       = image.array + mod.data
         tims.append(tim)
         
     ##
@@ -158,4 +158,4 @@ if __name__ == '__main__':
             plt.title('%s #%i' % (band, e+1))
             
     plt.suptitle('Optimized models + noise')
-    plt.savefig('opt_noise. png')
+    plt.savefig('opt_noise.png')
