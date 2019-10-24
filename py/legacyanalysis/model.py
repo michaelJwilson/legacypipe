@@ -26,6 +26,7 @@ if __name__ == '__main__':
     ##  Median per-pixel error standard deviation, in nanomaggies.
     sky_levels_sigs   = decam_accds[1]['sig1'][:]
     sky_level_sig     = float(sky_levels_sigs[0])
+    sky_level_sig     = tractor.NanoMaggies(g=sky_level_sig, r=0.0, z=0.0)
     
     psf_fwhm_pixels   = decam_accds[1]['fwhm'][:]
     psf_fwhm          = psf_fwhm_pixels[0] * pixscale                     # arcsecond.                                                                                                                                              
@@ -56,7 +57,7 @@ if __name__ == '__main__':
 
     gmag              = 23.0
     ##  gflux         = exptime * 10.**((zpt - gmag) / 2.5)               # [Total counts on the image].
-    gflux             = 10**(-0.4*(gmag-22.5))
+    gflux             = 10**(-0.4*(gmag-22.5))                            # [Nanomaggies].  
 
     gre               = 0.40                                              # [arcsec].                    
 
@@ -72,35 +73,35 @@ if __name__ == '__main__':
     tims = []
 
     for band in ['g', 'r', 'z']:
-        ##  photcal   = tractor.LinearPhotoCal(1., band=band)
-        photcal       = tractor.MagsPhotoCal(band, zpt)
+        ##  photcal    = tractor.LinearPhotoCal(1., band=band)
+        photcal        = tractor.MagsPhotoCal(band, zpt)
+
+        csky_level_sig = photcal.brightnessToCounts(sky_level_sig)
         
-        tim           = tractor.Image(data=np.zeros((H,W),  np.float32),
-                                      inverr=np.ones((H,W), np.float32),
-                                      psf=psf,
-                                      wcs=wcs,
-                                      photcal=photcal)
-
-        _tr           = tractor.Tractor([tim], [src])
-        mod           = _tr.getModelImage(0)
+        ##  The rms of the noise in ADU.                                                                                                                                                                                               
+        ##  noise      = galsim.PoissonNoise(rng, sky_level=sky_level_pixel)                                                                                                                                                             
+        ##  Gaussian approximation for large N.                                                                                                                                                                                        
+        ##  noise      = galsim.GaussianNoise(rng, sigma=sky_level_sig)                                                                                                                                                                  
+        ##  Rendered in counts.                                                                                                                                                                                                        
+        noise          = np.random.normal(loc=csky_level_sig, scale=np.sqrt(csky_level_sig), size=(H,W))
         
-        ##  The rms of the noise in ADU.
-        ##  noise     = galsim.PoissonNoise(rng, sky_level=sky_level_pixel)
+        tim            = tractor.Image(data=np.zeros((H,W),  np.float32),
+                                       inverr=np.ones((H,W), np.float32),
+                                       psf=psf,
+                                       wcs=wcs,
+                                       photcal=photcal)
 
-        ##  Gaussian approximation for large N. 
-        noise         = galsim.GaussianNoise(rng, sigma=sky_level_sig)
+        ##  _tr            = tractor.Tractor([tim], [src])
+        ##  mod            = _tr.getModelImage(0)
 
-        image         = galsim.Image(np.array(tim.data))
-        image.addNoise(noise)
-
-        tim.data      = image.array + mod.data
+        tim.data       = tim.data + noise.data ##  + mod.data
         tims.append(tim)
         
     ##
-    tr                = tractor.Tractor(tims, [src])
+    tr                 = tractor.Tractor(tims, [src])
 
     # Evaluate likelihood.
-    lnp               = tr.getLogProb()
+    lnp                = tr.getLogProb()
     print('Logprob:', lnp)
 
     for nm,val in zip(tr.getParamNames(), tr.getParams()):
@@ -157,4 +158,4 @@ if __name__ == '__main__':
             plt.title('%s #%i' % (band, e+1))
             
     plt.suptitle('Optimized models + noise')
-    plt.savefig('opt_noise.png')
+    plt.savefig('opt_noise. png')
