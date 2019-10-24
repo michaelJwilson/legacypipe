@@ -96,9 +96,11 @@ if __name__ == '__main__':
 
         tim.data       = tim.data + noise.data ##  + mod.data
         tims.append(tim)
+
+    cat                 = tractor.Catalog(src)
         
     ##
-    tr                 = tractor.Tractor(tims, [src])
+    tr                 = tractor.Tractor(tims, cat)
 
     # Evaluate likelihood.
     lnp                = tr.getLogProb()
