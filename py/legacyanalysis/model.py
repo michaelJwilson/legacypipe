@@ -70,9 +70,10 @@ if __name__ == '__main__':
     wcs               = Tan(ra, dec, W/2.+0.5, H/2.+0.5, -ps, 0., 0., ps, float(W), float(H))
     wcs               = tractor.ConstantFitsWcs(wcs)
 
-    tims = []
-
-    for band in ['g', 'r', 'z']:
+    tims  = []
+    bands = ['g', 'r', 'z']
+    
+    for band in bands:
         ##  photcal    = tractor.LinearPhotoCal(1., band=band)
         photcal        = tractor.MagsPhotoCal(band, zpt)
 
@@ -89,12 +90,12 @@ if __name__ == '__main__':
                                        inverr=np.ones((H,W), np.float32),
                                        psf=psf,
                                        wcs=wcs,
-                                       photcal=photcal)
+                                       photocal=photcal)
 
-        ##  _tr            = tractor.Tractor([tim], [src])
-        ##  mod            = _tr.getModelImage(0)
+        _tr            = tractor.Tractor([tim], [src])
+        mod            = _tr.getModelImage(0)
 
-        tim.data       = tim.data + noise.data ##  + mod.data
+        tim.data       = tim.data + noise.data + mod.data
         tims.append(tim)
 
     cat                 = tractor.Catalog(src)
@@ -107,16 +108,10 @@ if __name__ == '__main__':
     print('Logprob:', lnp)
 
     for nm,val in zip(tr.getParamNames(), tr.getParams()):
-        print('  ', nm, val)
-
-    exit(0)
+      print('  ', nm, val)
     
-    mod               = tr.getModelImage(0)
-
-    np.savetxt('output/rex_noiseless.txt', mod)
-
     # Reset the source params.
-    src.brightness.setParams([1.])
+    src.brightness.setParams([1., 1., 1.])
 
     tr.freezeParam('images')
 
@@ -137,27 +132,17 @@ if __name__ == '__main__':
             break
 
     # Plot optimized models.
-    mods = [tractor.getModelImage(i) for i in range(len(tims))]
+    mods    = [tr.getModelImage(i) for i in range(len(tims))]
     plt.clf()
-    for i,band in enumerate(bands):
-        for e in range(nepochs):
-            plt.subplot(nepochs, len(bands), e*len(bands) + i +1)
-            plt.imshow(mods[nepochs*i + e], **ima)
-            plt.xticks([]); plt.yticks([])
-            plt.title('%s #%i' % (band, e+1))
 
+    nepochs = 1
+    
+    for i,band in enumerate(bands):
+      for e in range(nepochs):
+        plt.subplot(nepochs, len(bands), e*len(bands) + i +1)
+        plt.imshow(mods[nepochs*i + e])
+        plt.xticks([]); plt.yticks([])
+        plt.title('%s #%i' % (band, e+1))
+        
     plt.suptitle('Optimized models')
     plt.savefig('opt.png')
-
-    # Plot optimized models + noise:
-    plt.clf()
-    for i,band in enumerate(bands):
-        for e in range(nepochs):
-            plt.subplot(nepochs, len(bands), e*len(bands) + i +1)
-            mod = mods[nepochs*i + e]
-            plt.imshow(mod + pixnoise * np.random.normal(size=mod.shape), **ima)
-            plt.xticks([]); plt.yticks([])
-            plt.title('%s #%i' % (band, e+1))
-            
-    plt.suptitle('Optimized models + noise')
-    plt.savefig('opt_noise. png')
