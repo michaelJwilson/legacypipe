@@ -587,7 +587,8 @@ def tim_get_resamp(tim, targetwcs):
     if hasattr(tim, 'resamp'):
         return tim.resamp
     try:
-        Yo,Xo,Yi,Xi,_ = resample_with_wcs(targetwcs, tim.subwcs, intType=np.int16)
+        ##  intType=np.int16
+        Yo,Xo,Yi,Xi,_ = resample_with_wcs(targetwcs, tim.subwcs)
     except OverlapError:
         print('No overlap')
         return None

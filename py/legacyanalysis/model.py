@@ -1,14 +1,16 @@
 import  fitsio
 import  galsim
 import  tractor
-import  numpy                     as      np
-import  pylab                     as      plt
+import  numpy                      as      np
+import  pylab                      as      plt
 
-from    legacypipe.survey         import  RexGalaxy, LogRadius
-from    legacypipe.detection      import  run_sed_matched_filters, detection_maps
-from    astrometry.util.util      import  Tan
-from    tractor.sky               import  ConstantSky
-from    astrometry.util.multiproc import  *
+from    legacypipe.survey          import  RexGalaxy, LogRadius, wcs_for_brick
+from    legacypipe.detection       import  run_sed_matched_filters, detection_maps, sed_matched_filters
+from    astrometry.util.util       import  Tan
+from    tractor.sky                import  ConstantSky
+from    astrometry.util.multiproc  import  *
+from    legacypipe.runbrick        import  stage_srcs
+from    legacypipe.survey          import  LegacySurveyData
 
 
 seed                = 2134
@@ -60,6 +62,7 @@ def gen_psf(fwhm, ell, theta, pixscale, H, W):
 if __name__ == '__main__':
   print('Welcome to montelg src.')
 
+  survey            = LegacySurveyData()
   bands             = ['g', 'r', 'z']
 
   red               = dict(g=2.5, r=1., i=0.4, z=0.4)
@@ -77,16 +80,22 @@ if __name__ == '__main__':
   src               = RexGalaxy(tractor.RaDecPos(ra, dec), gflux, LogRadius(gre))
 
   print('Solving for {}'.format(src))
-  
+
+  ##  Pixscale.
+  pixscale          = 0.262                                             # [arcsec / pixel], DECAM.                                                                                                                                     
+  ps                = pixscale / 3600.
+    
   ##  Image. 
   H, W              = 100, 100
-  
-  pixscale          = 0.262                                             # [arcsec / pixel], DECAM. 
-  ps                = pixscale / 3600.
+
+  ##  Bricka.                                                                                                                                                                                                                          
+  ##  /project/projectdirs/cosmo/data/legacysurvey/dr8/north/tractor/115/                                                                                                                                                              
 
   ##  WCS.
-  wcs               = Tan(ra, dec, W/2.+0.5, H/2.+0.5, -ps, 0., 0., ps, float(W), float(H))
-  wcs               = tractor.ConstantFitsWcs(wcs)                      # tractor.TanWcs(wcs)
+  targetwcs         = Tan(ra, dec, W/2. + 0.5, H/2. + 0.5, -ps, 0., 0., ps, float(W), float(H))
+  wcs               = tractor.ConstantFitsWcs(targetwcs)              
+
+  targetrd          = np.array([targetwcs.pixelxy2radec(x,y) for x,y in [(1,1), (W,1), (W,H), (1,H), (1,1)]])
   
   tims              = []
   
@@ -106,23 +115,107 @@ if __name__ == '__main__':
                                                                        inverr=np.ones((H,W), np.float32),
                                                                        psf=psf,
                                                                        wcs=wcs,
+                                                                       sky=None,
                                                                        photocal=photcal)
 
+    tim.band                                           = band
+
+    tim.psf_fwhm                                       = psf_fwhm
+
+    ##  Gaussian approximation. 
+    tim.psf_sigma                                      = psf_fwhm / (2. * np.sqrt(2. * np.log(2.)))
+
+    tim.dq                                             = None
+    tim.sig1                                           = sky_level_sig
+    tim.x0, tim.y0                                     = int(0), int(0)
+
+    subh, subw                                         = tim.shape
+    tim.subwcs                                         = targetwcs.get_subimage(tim.x0, tim.y0, subw, subh)
+    
     tr                                                 = tractor.Tractor([tim], [src])
     mod                                                = tr.getModelImage(0)
 
     tim.data                                           = tim.data + noise.data + mod.data
+
     tims.append(tim)
     
     print('Appended {} image: sky {:.4f} [nanomaggies];  psf fwhm  {:.4f};  zpt  {:.4f}'.format(band, sky_level_sig, psf_fwhm, zpt))
-    
+
   ##
-  mp = multiproc()
+  mp                           = multiproc()  
+
+  detmaps, detivs, satmaps     = detection_maps(tims, targetwcs, bands, mp=mp, apodize=None) 
+
+  SEDs                         = sed_matched_filters(bands)
+  Tnew, newcat, hot            = run_sed_matched_filters(SEDs, bands, detmaps, detivs, omit_xy=None, targetwcs=targetwcs, nsigma=6.0)  
+
+  ##
+  keys                         = ['version_header', 'targetrd', 'pixscale', 'targetwcs', 'W','H', 'bands', 'tims', 'ps', 'brickid', 'brickname', 'brick', 'custom_brick', 'target_extent', 'ccds', 'bands', 'survey']
+  src_rtn                      = stage_srcs(targetrd=targetrd,
+                                            pixscale=pixscale,
+                                            targetwcs=targetwcs,
+                                            W=W,
+                                            H=H,
+                                            bands=bands,
+                                            ps=None,
+                                            tims=tims,
+                                            plots=False,
+                                            plots2=False,
+                                            brickname=None,
+                                            mp=mp,
+                                            nsigma=6.0,
+                                            survey=survey,
+                                            brick=None,
+                                            bailout_sources=False,
+                                            tycho_stars=False,
+                                            gaia_stars=False,
+                                            large_galaxies=False,
+                                            star_clusters=True,
+                                            star_halos=False)
+
+
+  for x in src_rtn.keys():
+    print(src_rtn[x])
   
-  ##  detmaps, detivs, satmaps = detection_maps(tims, wcs, bands, mp=mp, apodize=None)
-  ##                                                                                                                                                                                                                       
-  ##  Tnew, newcat, hot        = run_sed_matched_filters(SEDs, bands, detmaps, detivs, omit_xy=None, targetwcs, nsigma=6)
-  
+  blob_keys                    = ['cat', 'invvars', 'T', 'blobs', 'brightblobmask']
+  blob_rtn                     = stage_fitblobs(T=None,
+                                                T_clusters=None,
+                                                brickname=None,
+                                                brickid=None,
+                                                brick=None,
+                                                version_header=None,
+                                                blobsrcs=None,
+                                                blobslices=None,
+                                                blobs=None,
+                                                cat=None,
+                                                targetwcs=None,
+                                                W=None,
+                                                H=None,
+                                                bands=None,
+                                                ps=None,
+                                                tims=None,
+                                                survey=None,
+                                                plots=False,
+                                                plots2=False,
+                                                nblobs=None,
+                                                blob0=None,
+                                                blobxy=None,
+                                                blobradec=None,
+                                                blobid=None,
+                                                max_blobsize=None,
+                                                simul_opt=False,
+                                                use_ceres=True,
+                                                mp=None,
+                                                checkpoint_filename=None,
+                                                checkpoint_period=600,
+                                                write_pickle_filename=None,
+                                                write_metrics=True,
+                                                get_all_models=False,
+                                                refstars=None,
+                                                bailout=False,
+                                                record_event=None,
+                                                custom_brick=False)
+                                                                                                                                                                                                                                   
   ##
   cat = tractor.Catalog(src)
         
