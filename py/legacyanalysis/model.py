@@ -1,13 +1,14 @@
 import  fitsio
 import  galsim
 import  tractor
-import  numpy                  as      np
-import  pylab                  as      plt
+import  numpy                     as      np
+import  pylab                     as      plt
 
-from    legacypipe.survey      import  RexGalaxy, LogRadius
-from    legacypipe.detection   import  run_sed_matched_filters, detection_maps
-from    astrometry.util.util   import  Tan
-from    tractor.sky            import  ConstantSky
+from    legacypipe.survey         import  RexGalaxy, LogRadius
+from    legacypipe.detection      import  run_sed_matched_filters, detection_maps
+from    astrometry.util.util      import  Tan
+from    tractor.sky               import  ConstantSky
+from    astrometry.util.multiproc import  *
 
 
 seed                = 2134
@@ -19,25 +20,27 @@ def unpack_ccds(band='g', index=0, fname='/global/cscratch1/sd/mjwilson/BGS/SV-A
   '''
   
   ##  Mean sky count level per pixel in the CP-processed frames measured (with iterative rejection) for each CCD in the image section.                                                                                                 
-  decam_accds       =  fitsio.FITS(fname)
+  decam_accds       = fitsio.FITS(fname)
   
-  bands             =  decam_accds[1]['filter'][:]
-  inband            = (bands == band)
+  bands             = decam_accds[1]['filter'][:]
+  inband            = bands == band.encode('utf-8')
 
-  sky_levels_pixel  = decam_accds[1]['ccdskycounts'][inband]            # sky_level_pixel = sky_level * pixel_scale**2
+  assert  np.any(inband == True)
+  
+  sky_levels_pixel  = decam_accds[1]['ccdskycounts'][:][inband]            # sky_level_pixel = sky_level * pixel_scale**2
 
   ##  Median per-pixel error standard deviation, in nanomaggies.                                                                                                                                                                      
-  sky_levels_sigs   = decam_accds[1]['sig1'][inband].astype(float)
+  sky_levels_sigs   = decam_accds[1]['sig1'][:][inband].astype(float)
   
-  psf_fwhm_pixels   = decam_accds[1]['fwhm'][inband]
-  psf_fwhms         = psf_fwhm_pixels * pixscale                        # arcsecond.        
+  psf_fwhm_pixels   = decam_accds[1]['fwhm'][:][inband]
+  psf_fwhms         = psf_fwhm_pixels * pixscale                           # arcsecond.        
 
-  exptimes          = decam_accds[1]['exptime'][inband]
+  exptimes          = decam_accds[1]['exptime'][:][inband]
 
-  zpts              = decam_accds[1]['zpt'][inband]
+  zpts              = decam_accds[1]['zpt'][:][inband]
 
-  psf_thetas        = decam_accds[1]['psf_theta'][inband]               # PSF position angle [deg.]   
-  psf_ells          = decam_accds[1]['psf_ell'][inband]
+  psf_thetas        = decam_accds[1]['psf_theta'][:][inband]               # PSF position angle [deg.]   
+  psf_ells          = decam_accds[1]['psf_ell'][:][inband]
 
   return  sky_levels_sigs[index],  psf_fwhms[index], zpts[index], psf_thetas[index], psf_ells[index]
 
@@ -55,6 +58,8 @@ def gen_psf(fwhm, ell, theta, pixscale, H, W):
 
 
 if __name__ == '__main__':
+  print('Welcome to montelg src.')
+
   bands             = ['g', 'r', 'z']
 
   red               = dict(g=2.5, r=1., i=0.4, z=0.4)
@@ -63,7 +68,7 @@ if __name__ == '__main__':
   ra, dec           = 40., 10.
 
   gre               = 0.40                                              # [arcsec]. 
-  gmag              = 21.0
+  gmag              = 23.0
   gflux             = 10. ** (-0.4 * ( gmag - 22.5 ))                   # [Nanomaggies].
   ##  gflux         = exptime * 10.**((zpt - gmag) / 2.5)               # [Total counts on the image].
     
@@ -71,6 +76,8 @@ if __name__ == '__main__':
   gflux             = tractor.NanoMaggies(**{'g': gflux, 'r': gflux / red['g'],  'z': red['z'] * gflux / red['g']})
   src               = RexGalaxy(tractor.RaDecPos(ra, dec), gflux, LogRadius(gre))
 
+  print('Solving for {}'.format(src))
+  
   ##  Image. 
   H, W              = 100, 100
   
@@ -82,7 +89,7 @@ if __name__ == '__main__':
   wcs               = tractor.ConstantFitsWcs(wcs)                      # tractor.TanWcs(wcs)
   
   tims              = []
-    
+  
   for band in bands:
     sky_level_sig,  psf_fwhm, zpt, psf_theta, psf_ell  = unpack_ccds(band=band, index=0)
 
@@ -106,11 +113,14 @@ if __name__ == '__main__':
 
     tim.data                                           = tim.data + noise.data + mod.data
     tims.append(tim)
-
+    
+    print('Appended {} image: sky {:.4f} [nanomaggies];  psf fwhm  {:.4f};  zpt  {:.4f}'.format(band, sky_level_sig, psf_fwhm, zpt))
+    
   ##
-  ##  detmaps, detivs, satmaps = detection_maps(tims, wcs, bands, mp=None, apodize=None)
-
-  ##                                                                                                                                                                                                                                  
+  mp = multiproc()
+  
+  ##  detmaps, detivs, satmaps = detection_maps(tims, wcs, bands, mp=mp, apodize=None)
+  ##                                                                                                                                                                                                                       
   ##  Tnew, newcat, hot        = run_sed_matched_filters(SEDs, bands, detmaps, detivs, omit_xy=None, targetwcs, nsigma=6)
   
   ##
@@ -121,13 +131,12 @@ if __name__ == '__main__':
   
   ##  Evaluate likelihood.
   lnp                = tr.getLogProb()
-  print('Logprob:', lnp)
 
   for nm,val in zip(tr.getParamNames(), tr.getParams()):
     print('{} \t {}'.format(nm, val))
     
   ##  Reset the source params.
-  src.brightness.setParams([1., 1., 1.])
+  src.brightness.setParams([.5] * 3)
 
   tr.freezeParam('images')
 
@@ -146,6 +155,9 @@ if __name__ == '__main__':
     if dlnp < 1e-4:
       break
 
+  ##  Generate all models output.
+  
+    
   ##  Plot optimized models.
   plt.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.92)
 
@@ -156,7 +168,7 @@ if __name__ == '__main__':
 
   nepochs = 1
     
-  for i,band in enumerate(bands):
+  for i, band in enumerate(bands):
     for e in range(nepochs):
       plt.subplot(nepochs, len(bands), e*len(bands) + i +1)
       plt.imshow(mods[nepochs*i + e])
@@ -165,3 +177,5 @@ if __name__ == '__main__':
         
   plt.suptitle('Optimized models')
   plt.savefig('opt.png')
+
+  print('\n\nDone.\n\n')
