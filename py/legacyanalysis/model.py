@@ -14,7 +14,8 @@ from    legacypipe.runbrick             import  stage_srcs, stage_fitblobs
 from    legacypipe.survey               import  LegacySurveyData
 from    astrometry.util.fits            import  *
 from    astrometry.util.util            import  *
-from    astrometry.util.starutil_numpy  import degrees_between
+from    astrometry.util.plotutils       import  *
+from    astrometry.util.starutil_numpy  import  degrees_between
 
 
 seed                = 2134
@@ -67,7 +68,7 @@ if __name__ == '__main__':
   print('Welcome to montelg src.')
 
   survey                          = LegacySurveyData()
-
+  
   bands                           = ['g', 'r', 'z']
   
   red                             = dict(g=2.5, r=1., i=0.4, z=0.4)
@@ -86,6 +87,9 @@ if __name__ == '__main__':
   gflux             = tractor.NanoMaggies(**{'g': gflux, 'r': gflux / red['g'],  'z': red['z'] * gflux / red['g']})
   src               = RexGalaxy(tractor.RaDecPos(ra, dec), gflux, LogRadius(gre))
 
+  ##                                                                                                                                                                                                                                                      
+  cat = tractor.Catalog(src)
+  
   print('Solving for {}'.format(src))
 
   ##  Pixscale.
@@ -99,6 +103,8 @@ if __name__ == '__main__':
   targetwcs         = Tan(ra, dec, W/2. + 0.5, H/2. + 0.5, -ps, 0., 0., ps, float(W), float(H))
   wcs               = tractor.ConstantFitsWcs(targetwcs)              
 
+  targetrd          = np.array([targetwcs.pixelxy2radec(x,y) for x,y in [(1,1), (W,1), (W,H), (1,H), (1,1)]])
+  
   ##  Bricks.
   B                 = survey.get_bricks_readonly()
   B.about()    
@@ -106,26 +112,29 @@ if __name__ == '__main__':
 
   brick             = B[0]
     
-  targetrd          = np.array([targetwcs.pixelxy2radec(x,y) for x,y in [(1,1), (W,1), (W,H), (1,H), (1,1)]])
-  
   tims              = []
   
   for band in bands:
     sky_level_sig,  psf_fwhm, zpt, psf_theta, psf_ell  = unpack_ccds(band=band, index=0)
+
+    ##  Gaussian approx. 
     psf_sigma                                          = psf_fwhm / (2. * np.sqrt(2. * np.log(2.)))
     psf_sigma2                                         = psf_sigma ** 2.
+
     psfnorm                                            = 1./(2. * np.sqrt(np.pi) * psf_sigma)
-    
-    photcal                                            = tractor.MagsPhotoCal(band, zpt) 
 
     psf                                                = tractor.GaussianMixturePSF(1., 0., 0., psf_sigma2, psf_sigma2, 0.)
-    ##  psf                                            = gen_psf(psf_fwhm, psf_ell, psf_theta, pixscale, H, W)
+    ##  psf                                            = gen_psf(psf_fwhm, psf_ell, psf_theta, pixscale, H, W) 
+    
+    ## 
+    photcal                                            = tractor.MagsPhotoCal(band, zpt) 
     
     sky_level_sig                                      = tractor.NanoMaggies(**{band: sky_level_sig})
     sky_level_sig                                      = photcal.brightnessToCounts(sky_level_sig)
         
     noise                                              = np.random.normal(loc=sky_level_sig, scale=np.sqrt(sky_level_sig), size=(H,W))
-        
+
+    ##
     tim                                                = tractor.Image(data=np.zeros((H,W),  np.float32),
                                                                        inverr=np.ones((H,W), np.float32),
                                                                        psf=psf,
@@ -156,20 +165,19 @@ if __name__ == '__main__':
     tims.append(tim)
     
     print('Appended {} image: sky {:.4f} [nanomaggies];  psf fwhm  {:.4f};  zpt  {:.4f}'.format(band, sky_level_sig, psf_fwhm, zpt))
-
+    
   ##
   mp                           = multiproc()  
-
-  detmaps, detivs, satmaps     = detection_maps(tims, targetwcs, bands, mp=mp, apodize=None) 
   
-  ##                                                                                                                                                                                                                                  
-  cat = tractor.Catalog(src)
-  
+  ##                                                                                                                                                                                                                                                       
   SEDs                         = sed_matched_filters(bands)
+  
+  detmaps, detivs, satmaps     = detection_maps(tims, targetwcs, bands, mp=mp, apodize=None) 
   Tnew, newcat, hot            = run_sed_matched_filters(SEDs, bands, detmaps, detivs, omit_xy=None, targetwcs=targetwcs, nsigma=6.0)  
 
   ##
-  keys                         = ['version_header', 'targetrd', 'pixscale', 'targetwcs', 'W', 'H', 'bands', 'tims', 'ps', 'brickid', 'brickname', 'brick', 'custom_brick', 'target_extent', 'ccds', 'bands', 'survey']
+  src_rtn_keys                 = ['T', 'tims', 'blobsrcs', 'blobslices', 'blobs', 'cat', 'ps', 'refstars', 'gaia_stars', 'saturated_pix', 'T_donotfit', 'T_clusters']
+
   src_rtn                      = stage_srcs(targetrd=targetrd,
                                             pixscale=pixscale,
                                             targetwcs=targetwcs,
@@ -195,10 +203,8 @@ if __name__ == '__main__':
 
   for x in src_rtn.keys():
     print(src_rtn[x])
-
-  keys                         = ['T', 'tims', 'blobsrcs', 'blobslices', 'blobs', 'cat', 'ps', 'refstars', 'gaia_stars', 'saturated_pix', 'T_donotfit', 'T_clusters']
     
-  blob_keys                    = ['cat', 'invvars', 'T', 'blobs', 'brightblobmask']
+  blob_rtn_keys                = ['cat', 'invvars', 'T', 'blobs', 'brightblobmask']
   blob_rtn                     = stage_fitblobs(T=src_rtn['T'],
                                                 T_clusters=None,
                                                 brickname=None,
