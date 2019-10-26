@@ -1,16 +1,20 @@
+import  os
 import  fitsio
 import  galsim
 import  tractor
-import  numpy                      as      np
-import  pylab                      as      plt
+import  numpy                           as      np
+import  pylab                           as      plt 
 
-from    legacypipe.survey          import  RexGalaxy, LogRadius, wcs_for_brick
-from    legacypipe.detection       import  run_sed_matched_filters, detection_maps, sed_matched_filters
-from    astrometry.util.util       import  Tan
-from    tractor.sky                import  ConstantSky
-from    astrometry.util.multiproc  import  *
-from    legacypipe.runbrick        import  stage_srcs
-from    legacypipe.survey          import  LegacySurveyData
+from    legacypipe.survey               import  RexGalaxy, LogRadius, wcs_for_brick
+from    legacypipe.detection            import  run_sed_matched_filters, detection_maps, sed_matched_filters
+from    astrometry.util.util            import  Tan
+from    tractor.sky                     import  ConstantSky
+from    astrometry.util.multiproc       import  *
+from    legacypipe.runbrick             import  stage_srcs, stage_fitblobs
+from    legacypipe.survey               import  LegacySurveyData
+from    astrometry.util.fits            import  *
+from    astrometry.util.util            import  *
+from    astrometry.util.starutil_numpy  import degrees_between
 
 
 seed                = 2134
@@ -62,11 +66,14 @@ def gen_psf(fwhm, ell, theta, pixscale, H, W):
 if __name__ == '__main__':
   print('Welcome to montelg src.')
 
-  survey            = LegacySurveyData()
-  bands             = ['g', 'r', 'z']
+  survey                          = LegacySurveyData()
 
-  red               = dict(g=2.5, r=1., i=0.4, z=0.4)
+  bands                           = ['g', 'r', 'z']
+  
+  red                             = dict(g=2.5, r=1., i=0.4, z=0.4)
 
+  os.environ['LEGACY_SURVEY_DIR'] = '/project/projectdirs/cosmo/data/legacysurvey/dr8/'
+  
   ##  Source.
   ra, dec           = 40., 10.
 
@@ -87,24 +94,32 @@ if __name__ == '__main__':
     
   ##  Image. 
   H, W              = 100, 100
-
-  ##  Bricka.                                                                                                                                                                                                                          
-  ##  /project/projectdirs/cosmo/data/legacysurvey/dr8/north/tractor/115/                                                                                                                                                              
-
+                                                                                                                                                                                                           
   ##  WCS.
   targetwcs         = Tan(ra, dec, W/2. + 0.5, H/2. + 0.5, -ps, 0., 0., ps, float(W), float(H))
   wcs               = tractor.ConstantFitsWcs(targetwcs)              
 
+  ##  Bricks.
+  B                 = survey.get_bricks_readonly()
+  B.about()    
+  B.cut(np.argsort(degrees_between(ra, dec, B.ra, B.dec)))
+
+  brick             = B[0]
+    
   targetrd          = np.array([targetwcs.pixelxy2radec(x,y) for x,y in [(1,1), (W,1), (W,H), (1,H), (1,1)]])
   
   tims              = []
   
   for band in bands:
     sky_level_sig,  psf_fwhm, zpt, psf_theta, psf_ell  = unpack_ccds(band=band, index=0)
-
+    psf_sigma                                          = psf_fwhm / (2. * np.sqrt(2. * np.log(2.)))
+    psf_sigma2                                         = psf_sigma ** 2.
+    psfnorm                                            = 1./(2. * np.sqrt(np.pi) * psf_sigma)
+    
     photcal                                            = tractor.MagsPhotoCal(band, zpt) 
 
-    psf                                                = gen_psf(psf_fwhm, psf_ell, psf_theta, pixscale, H, W)
+    psf                                                = tractor.GaussianMixturePSF(1., 0., 0., psf_sigma2, psf_sigma2, 0.)
+    ##  psf                                            = gen_psf(psf_fwhm, psf_ell, psf_theta, pixscale, H, W)
     
     sky_level_sig                                      = tractor.NanoMaggies(**{band: sky_level_sig})
     sky_level_sig                                      = photcal.brightnessToCounts(sky_level_sig)
@@ -124,7 +139,8 @@ if __name__ == '__main__':
 
     ##  Gaussian approximation. 
     tim.psf_sigma                                      = psf_fwhm / (2. * np.sqrt(2. * np.log(2.)))
-
+    tim.psfnorm                                        = psfnorm
+    
     tim.dq                                             = None
     tim.sig1                                           = sky_level_sig
     tim.x0, tim.y0                                     = int(0), int(0)
@@ -145,12 +161,15 @@ if __name__ == '__main__':
   mp                           = multiproc()  
 
   detmaps, detivs, satmaps     = detection_maps(tims, targetwcs, bands, mp=mp, apodize=None) 
-
+  
+  ##                                                                                                                                                                                                                                  
+  cat = tractor.Catalog(src)
+  
   SEDs                         = sed_matched_filters(bands)
   Tnew, newcat, hot            = run_sed_matched_filters(SEDs, bands, detmaps, detivs, omit_xy=None, targetwcs=targetwcs, nsigma=6.0)  
 
   ##
-  keys                         = ['version_header', 'targetrd', 'pixscale', 'targetwcs', 'W','H', 'bands', 'tims', 'ps', 'brickid', 'brickname', 'brick', 'custom_brick', 'target_extent', 'ccds', 'bands', 'survey']
+  keys                         = ['version_header', 'targetrd', 'pixscale', 'targetwcs', 'W', 'H', 'bands', 'tims', 'ps', 'brickid', 'brickname', 'brick', 'custom_brick', 'target_extent', 'ccds', 'bands', 'survey']
   src_rtn                      = stage_srcs(targetrd=targetrd,
                                             pixscale=pixscale,
                                             targetwcs=targetwcs,
@@ -176,25 +195,27 @@ if __name__ == '__main__':
 
   for x in src_rtn.keys():
     print(src_rtn[x])
-  
+
+  keys                         = ['T', 'tims', 'blobsrcs', 'blobslices', 'blobs', 'cat', 'ps', 'refstars', 'gaia_stars', 'saturated_pix', 'T_donotfit', 'T_clusters']
+    
   blob_keys                    = ['cat', 'invvars', 'T', 'blobs', 'brightblobmask']
-  blob_rtn                     = stage_fitblobs(T=None,
+  blob_rtn                     = stage_fitblobs(T=src_rtn['T'],
                                                 T_clusters=None,
                                                 brickname=None,
                                                 brickid=None,
-                                                brick=None,
+                                                brick=brick,
                                                 version_header=None,
-                                                blobsrcs=None,
-                                                blobslices=None,
-                                                blobs=None,
-                                                cat=None,
-                                                targetwcs=None,
-                                                W=None,
-                                                H=None,
-                                                bands=None,
-                                                ps=None,
-                                                tims=None,
-                                                survey=None,
+                                                blobsrcs=src_rtn['blobsrcs'],
+                                                blobslices=src_rtn['blobslices'],
+                                                blobs=src_rtn['blobs'],
+                                                cat=cat,
+                                                targetwcs=targetwcs,
+                                                W=W,
+                                                H=H,
+                                                bands=bands,
+                                                ps=ps,
+                                                tims=tims,
+                                                survey=survey,
                                                 plots=False,
                                                 plots2=False,
                                                 nblobs=None,
@@ -205,20 +226,17 @@ if __name__ == '__main__':
                                                 max_blobsize=None,
                                                 simul_opt=False,
                                                 use_ceres=True,
-                                                mp=None,
+                                                mp=mp,
                                                 checkpoint_filename=None,
                                                 checkpoint_period=600,
                                                 write_pickle_filename=None,
                                                 write_metrics=True,
-                                                get_all_models=False,
+                                                get_all_models=True,
                                                 refstars=None,
                                                 bailout=False,
                                                 record_event=None,
                                                 custom_brick=False)
-                                                                                                                                                                                                                                   
-  ##
-  cat = tractor.Catalog(src)
-        
+  
   ##
   tr  = tractor.Tractor(tims, cat)
   
