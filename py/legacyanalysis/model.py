@@ -12,11 +12,13 @@ from    tractor.sky                     import  ConstantSky
 from    astrometry.util.multiproc       import  *
 from    legacypipe.runbrick             import  stage_srcs, stage_fitblobs
 from    legacypipe.survey               import  LegacySurveyData
+from    legacypipe.image                import  LegacySurveyImage
 from    astrometry.util.fits            import  *
 from    astrometry.util.util            import  *
 from    astrometry.util.plotutils       import  *
 from    astrometry.util.starutil_numpy  import  degrees_between
-
+from    legacypipe.decam                import  DecamImage
+ 
 
 seed                = 2134
 rng                 = galsim.BaseDeviate(seed)
@@ -68,12 +70,19 @@ if __name__ == '__main__':
   print('Welcome to montelg src.')
 
   survey                          = LegacySurveyData()
+
+  ccds                            = survey.get_annotated_ccds()
+  ccds                            = survey.cleanup_ccds_table(ccds)
+  im                              = survey.get_image_object(ccds[0])
   
   bands                           = ['g', 'r', 'z']
   
   red                             = dict(g=2.5, r=1., i=0.4, z=0.4)
 
   os.environ['LEGACY_SURVEY_DIR'] = '/project/projectdirs/cosmo/data/legacysurvey/dr8/'
+
+
+
   
   ##  Source.
   ra, dec           = 40., 10.
@@ -142,6 +151,8 @@ if __name__ == '__main__':
                                                                        sky=None,
                                                                        photocal=photcal)
 
+    tim.imobj                                          = im
+    
     tim.band                                           = band
 
     tim.psf_fwhm                                       = psf_fwhm

@@ -4,6 +4,8 @@ module use /global/common/software/desi/$NERSC_HOST/desiconda/$desiconda_version
 
 module load desiconda
 
+
+export LEGACY_SURVEY_DIR=/project/projectdirs/cosmo/data/legacysurvey/dr8/
 export PYTHONPATH=/global/homes/m/mjwilson/LEGACY/legacypipe/py/:$PYTHONPATH
 
 export DUST_DIR=/global/project/projectdirs/cosmo/data/dust/v0_1
